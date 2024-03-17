@@ -1,17 +1,20 @@
 #pragma once
 
-#include <mutex>
+#include <atomic>
+#include <thread>
 
 class SpinLock {
 public:
     void Lock() {
-        mutex_.lock();
+        while (is_locked_.test_and_set()) {
+            std::this_thread::yield();
+        }
     }
 
     void Unlock() {
-        mutex_.unlock();
+        is_locked_.clear();
     }
 
 private:
-    std::mutex mutex_;
+    std::atomic_flag is_locked_;
 };
