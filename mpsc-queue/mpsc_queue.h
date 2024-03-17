@@ -1,46 +1,100 @@
 #pragma once
 
-#include <stack>
-#include <mutex>
-#include <optional>
+#include <atomic>
+#include <thread>
+#include <unordered_map>
 
 template <class T>
-class MPSCQueue {
+class StackEasy {
 public:
-    // Push adds one element to stack top.
-    // Safe to call from multiple threads.
-    void Push(T value) {
-        std::lock_guard guard{mutex_};
-        stack_.push(std::move(value));
+    StackEasy() : head_(nullptr) {
     }
 
-    // Pop removes top element from the stack.
-    // Not safe to call concurrently.
-    std::optional<T> Pop() {
-        std::lock_guard guard{mutex_};
-        if (stack_.empty()) {
-            return std::nullopt;
+    virtual ~StackEasy() {
+        DequeueAll([](T) {});
+    }
+
+    void Push(const T& value) {
+        Node* new_head = new Node(value);
+        new_head->next = head_.load();
+
+        while (!head_.compare_exchange_strong(new_head->next, new_head)) {
         }
-        std::optional result = std::move(stack_.top());
-        stack_.pop();
-        return result;
     }
 
-    // DequeuedAll Pop's all elements from the stack and calls callback() for each.
-    // Not safe to call concurrently with Pop()
     void DequeueAll(auto&& callback) {
-        std::stack<T> stack;
-        {
-            std::lock_guard guard{mutex_};
-            stack = std::move(stack_);
+        Node* head = head_.exchange(nullptr);
+        while (head != nullptr) {
+            Node* old_head = head;
+            head = old_head->next;
+            callback(old_head->value);
+            delete old_head;
         }
-        while (!stack.empty()) {
-            callback(std::move(stack.top()));
-            stack.pop();
+    }
+
+protected:
+    struct Node {
+        T value;
+        Node* next;
+    };
+
+    std::atomic<Node*> head_;
+};
+
+template <class T>
+class MPSCQueue : public StackEasy<T> {
+private:
+    using Node = StackEasy<T>::Node;
+
+public:
+    std::pair<T, bool> Pop() {
+        for (;;) {
+            Node* old_head = deleter_.ForbidDeletion(this->head_);
+            if (old_head == nullptr) {
+                return {{}, false};
+            }
+            if (this->head_.compare_exchange_strong(old_head, old_head->next)) {
+                T value(old_head->value);
+                deleter_.AllowDeletion();
+                deleter_.QueueDeletion(old_head);
+                return {value, true};
+            }
+            deleter_.AllowDeletion();
         }
     }
 
 private:
-    std::stack<T> stack_;
-    std::mutex mutex_;
+    class NodeDeleter {
+    public:
+        void QueueDeletion(Node* node) {
+            delete_queue_.Push(node);
+            delete_queue_.DequeueAll([&](Node* node) {
+                for (auto& [id, saved_node] : thread_nodes_) {
+                    if (saved_node == node) {
+                        delete_queue_.Push(node);
+                        return;
+                    }
+                }
+                delete node;
+            });
+        }
+
+        void AllowDeletion() {
+            thread_nodes_[std::this_thread::get_id()] = nullptr;
+        }
+
+        Node* ForbidDeletion(std::atomic<Node*>& node) {
+            Node* old_node = node.load();
+            do {
+                thread_nodes_[std::this_thread::get_id()] = old_node;
+            } while (!node.compare_exchange_strong(old_node, old_node));
+            return old_node;
+        }
+
+    private:
+        StackEasy<Node*> delete_queue_;
+        std::unordered_map<std::thread::id, Node*> thread_nodes_;
+    };
+
+    NodeDeleter deleter_;
 };
