@@ -1,6 +1,6 @@
 #pragma once
 
-#include <mutex>
+#include <cstdint>
 #include <atomic>
 
 #include <linux/futex.h>
@@ -23,13 +23,26 @@ inline void FutexWake(int* value, int count) {
 class Mutex {
 public:
     void Lock() {
-        mutex_.lock();
+        int32_t old_state = 0;
+        if (state_.compare_exchange_strong(old_state, 1)) {
+            return;
+        }
+        if (old_state != 2) {
+            old_state = state_.exchange(2);
+        }
+        while (old_state != 0) {
+            FutexWait(reinterpret_cast<int*>(&state_), 2);
+            old_state = state_.exchange(2);
+        }
     }
 
     void Unlock() {
-        mutex_.unlock();
+        if (state_.fetch_sub(1) != 1) {
+            state_.store(0);
+            FutexWake(reinterpret_cast<int*>(&state_), 1);
+        }
     }
 
 private:
-    std::mutex mutex_;
+    std::atomic<int32_t> state_ = 0;
 };
