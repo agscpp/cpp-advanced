@@ -1,27 +1,56 @@
 #pragma once
 
-#include <stack>
-#include <mutex>
+#include "../hazard-ptr/hazard_ptr.h"
+
+#include <atomic>
 
 template <class T>
 class Stack {
 public:
+    Stack() : head_(nullptr) {
+    }
+
+    virtual ~Stack() {
+        Clear();
+    }
+
     void Push(const T& value) {
-        std::lock_guard guard{mutex_};
-        data_.push(value);
+        Node* new_head = new Node(value);
+        new_head->next = head_.load();
+
+        while (!head_.compare_exchange_strong(new_head->next, new_head)) {
+        };
     }
 
     bool Pop(T* value) {
-        std::lock_guard guard{mutex_};
-        if (data_.empty()) {
-            return false;
+        for (;;) {
+            auto* old_head = Acquire(&head_);
+            if (old_head == nullptr) {
+                return false;
+            }
+            if (head_.compare_exchange_strong(old_head, old_head->next)) {
+                *value = std::move(old_head->value);
+                Retire(old_head);
+                Release();
+                return true;
+            }
         }
-        *value = std::move(data_.top());
-        data_.pop();
-        return true;
+    }
+
+    void Clear() {
+        Node* head = head_.exchange(nullptr);
+        while (head != nullptr) {
+            Node* old_head = head;
+            head = old_head->next;
+            Retire(old_head);
+        }
     }
 
 private:
-    std::stack<T> data_;
-    mutable std::mutex mutex_;
+    struct Node {
+        T value;
+        Node* next;
+    };
+
+    std::atomic<Node*> head_;
 };
