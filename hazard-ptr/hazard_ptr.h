@@ -55,13 +55,13 @@ void ScanFreeList() {
 
     while (retired) {
         if (std::find(hazard.begin(), hazard.end(), retired->value) != hazard.end()) {
-            auto old_retired = retired;
+            auto* old_retired = retired;
             retired = old_retired->next;
             AddRetiredQueue(old_retired);
             continue;
         }
 
-        auto old_retired = retired;
+        auto* old_retired = retired;
         retired = old_retired->next;
         old_retired->deleter();
         delete old_retired;
