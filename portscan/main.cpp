@@ -1,8 +1,8 @@
-#include <cactus/cactus.h>
-
 #include <chrono>
 #include <iostream>
 #include <ostream>
+
+#include <cactus/cactus.h>
 
 const std::string kHostIp = "51.250.102.65";
 constexpr uint16_t kStartPort = 11'000;

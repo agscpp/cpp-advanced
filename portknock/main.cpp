@@ -1,12 +1,12 @@
 #include "portknock.h"
 
-#include <cactus/cactus.h>
-
 #include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+
+#include <cactus/cactus.h>
 
 constexpr std::chrono::duration kDelay = std::chrono::seconds(0);
 constexpr std::chrono::duration kTimeout = std::chrono::seconds(1);
