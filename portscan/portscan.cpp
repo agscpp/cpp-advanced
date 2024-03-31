@@ -1,10 +1,7 @@
 #include "portscan.h"
 
-#include <cactus/cactus.h>
-
 #include <cstddef>
 #include <memory>
-#include <utility>
 
 Ports ScanPorts(const cactus::SocketAddress& remote, uint16_t start, uint16_t end,
                 cactus::Duration timeout) {
